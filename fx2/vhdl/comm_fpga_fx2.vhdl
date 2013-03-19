@@ -22,7 +22,8 @@ use ieee.numeric_std.all;
 entity comm_fpga_fx2 is
 	port(
 		clk_in         : in    std_logic;                     -- 48MHz clock from FX2LP
-		reset_in       : in    std_logic;                     -- synchronous active-high reset
+		reset_in       : in    std_logic;                     -- synchronous active-high reset input
+		reset_out      : out   std_logic;                     -- synchronous active-high reset output
 
 		-- FX2LP interface ---------------------------------------------------------------------------
 		fx2FifoSel_out : out   std_logic;                     -- select FIFO: '0' for EP2OUT, '1' for EP6IN
@@ -57,6 +58,7 @@ architecture rtl of comm_fpga_fx2 is
 	-- of the opposite sense to the host's read and write. So host reads are fulfilled in the S_WRITE state, and
 	-- vice-versa. Apologies for the confusion.
 	type StateType is (
+		S_RESET,                 -- wait for gotData_in to go low when FX2LP enables FIFO mode
 		S_IDLE,                  -- wait for requst from host & register chanAddr & isWrite
 		S_GET_COUNT0,            -- register most significant byte of message length
 		S_GET_COUNT1,            -- register next byte of message length
@@ -73,21 +75,21 @@ architecture rtl of comm_fpga_fx2 is
 	constant FIFO_NOP                : std_logic_vector(1 downto 0) := "11";             -- assert nothing
 	constant OUT_FIFO                : std_logic                    := '0';              -- EP2OUT
 	constant IN_FIFO                 : std_logic                    := '1';              -- EP6IN
-	signal state, state_next         : StateType                    := S_IDLE;
-	signal fifoOp                    : std_logic_vector(1 downto 0) := FIFO_NOP;
+	signal state, state_next         : StateType                    := S_RESET;
+	signal fifoOp                    : std_logic_vector(1 downto 0) := "ZZ";
 	signal count, count_next         : unsigned(31 downto 0)        := (others => '0');  -- read/write count
 	signal chanAddr, chanAddr_next   : std_logic_vector(6 downto 0) := (others => '0');  -- channel being accessed (0-127)
 	signal isWrite, isWrite_next     : std_logic                    := '0';              -- is this FX2LP FIFO access a write or a read?
 	signal isAligned, isAligned_next : std_logic                    := '0';              -- is this FX2LP FIFO write block-aligned?
 	signal dataOut                   : std_logic_vector(7 downto 0);                     -- data to be driven on fx2Data_io
-	signal driveBus                  : std_logic;                                        -- whether or not to drive fx2Data_io
+	signal driveBus                  : std_logic                    := '0';              -- whether or not to drive fx2Data_io
 begin
 	-- Infer registers
 	process(clk_in)
 	begin
 		if ( rising_edge(clk_in) ) then
 			if ( reset_in = '1' ) then
-				state <= S_IDLE;
+				state <= S_RESET;
 				count <= (others => '0');
 				chanAddr <= (others => '0');
 				isWrite <= '0';
@@ -118,6 +120,7 @@ begin
 		fx2PktEnd_out <= '1';         -- inactive: FPGA does not commit a short packet.
 		f2hReady_out <= '0';
 		h2fValid_out <= '0';
+		reset_out <= '0';
 
 		case state is
 			when S_GET_COUNT0 =>
@@ -211,6 +214,17 @@ begin
 					fifoOp <= FIFO_NOP;
 				end if;
 
+			-- S_RESET - tri-state everything
+			when S_RESET =>
+				reset_out <= '1';
+				driveBus <= '0';
+				fifoOp <= "ZZ";
+				fx2FifoSel_out <= 'Z';
+				fx2PktEnd_out <= 'Z';
+				if ( fx2GotData_in = '0' ) then
+					state_next <= S_IDLE;
+				end if;
+				
 			-- S_IDLE and others
 			when others =>
 				fx2FifoSel_out <= OUT_FIFO;  -- Reading from FX2LP
