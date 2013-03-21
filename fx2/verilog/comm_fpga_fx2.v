@@ -17,7 +17,8 @@
 module
 	comm_fpga_fx2(
 		input  wire      clk_in,          // 48MHz clock from FX2LP
-		input  wire      reset_in,        // synchronous active-high reset
+		input  wire      reset_in,        // synchronous active-high reset input
+		output reg       reset_out,       // synchronous active-high reset output
 
 		// FX2LP interface ---------------------------------------------------------------------------
 		output reg       fx2FifoSel_out,  // select FIFO: '0' for EP2OUT, '1' for EP6IN
@@ -49,37 +50,38 @@ module
 	// The read/write nomenclature here refers to the FPGA reading and writing the FX2LP FIFOs, and is therefore
 	// of the opposite sense to the host's read and write. So host reads are fulfilled in the S_WRITE state, and
 	// vice-versa. Apologies for the confusion.
-	localparam[3:0] S_IDLE                    = 4'h0;     // wait for requst from host & register chanAddr & isWrite
-	localparam[3:0] S_GET_COUNT0              = 4'h1;     // register most significant byte of message length
-	localparam[3:0] S_GET_COUNT1              = 4'h2;     // register next byte of message length
-	localparam[3:0] S_GET_COUNT2              = 4'h3;     // register next byte of message length
-	localparam[3:0] S_GET_COUNT3              = 4'h4;     // register least significant byte of message length
-	localparam[3:0] S_BEGIN_WRITE             = 4'h5;     // switch direction of FX2LP data bus
-	localparam[3:0] S_WRITE                   = 4'h6;     // write data to FX2LP EP6IN FIFO, one byte at a time
-	localparam[3:0] S_END_WRITE_ALIGNED       = 4'h7;     // end an aligned write (do not assert fx2PktEnd_out)
-	localparam[3:0] S_END_WRITE_NONALIGNED    = 4'h8;     // end a nonaligned write (assert fx2PktEnd_out)
-	localparam[3:0] S_READ                    = 4'h9;     // read data from FX2LP EP2OUT FIFO, one byte at a time
+	localparam[3:0] S_RESET                   = 4'h0;     // wait for gotData_in to go low when FX2LP enables FIFO mode
+	localparam[3:0] S_IDLE                    = 4'h1;     // wait for requst from host & register chanAddr & isWrite
+	localparam[3:0] S_GET_COUNT0              = 4'h2;     // register most significant byte of message length
+	localparam[3:0] S_GET_COUNT1              = 4'h3;     // register next byte of message length
+	localparam[3:0] S_GET_COUNT2              = 4'h4;     // register next byte of message length
+	localparam[3:0] S_GET_COUNT3              = 4'h5;     // register least significant byte of message length
+	localparam[3:0] S_BEGIN_WRITE             = 4'h6;     // switch direction of FX2LP data bus
+	localparam[3:0] S_WRITE                   = 4'h7;     // write data to FX2LP EP6IN FIFO, one byte at a time
+	localparam[3:0] S_END_WRITE_ALIGNED       = 4'h8;     // end an aligned write (do not assert fx2PktEnd_out)
+	localparam[3:0] S_END_WRITE_NONALIGNED    = 4'h9;     // end a nonaligned write (assert fx2PktEnd_out)
+	localparam[3:0] S_READ                    = 4'hA;     // read data from FX2LP EP2OUT FIFO, one byte at a time
 	
 	localparam[1:0] FIFO_READ                 = 2'b10;    // assert fx2Read_out (active-low)
 	localparam[1:0] FIFO_WRITE                = 2'b01;    // assert fx2Write_out (active-low)
 	localparam[1:0] FIFO_NOP                  = 2'b11;    // assert nothing
 	localparam      OUT_FIFO                  = 2'b0;     // EP2OUT
 	localparam      IN_FIFO                   = 2'b1;     // EP6IN
-	reg[3:0]        state_next, state         = S_IDLE;
-	reg[1:0]        fifoOp                    = FIFO_NOP;
+	reg[3:0]        state_next, state         = S_RESET;
+	reg[1:0]        fifoOp                    = 2'bZZ;
 	reg[31:0]       count_next, count         = 32'h0;    // read/write count
 	reg[6:0]        chanAddr_next, chanAddr   = 7'h00;    // channel being accessed (0-127)
 	reg             isWrite_next, isWrite     = 1'b0;     // is this FX2LP FIFO access a write or a read?
 	reg             isAligned_next, isAligned = 1'b0;     // is this FX2LP FIFO write block-aligned?
 	reg[7:0]        dataOut;                              // data to be driven on fx2Data_io
-	reg             driveBus;                             // whether or not to drive fx2Data_io
+	reg             driveBus                  = 1'b0;     // whether or not to drive fx2Data_io
 
 	// Infer registers
 	always @(posedge clk_in)
 	begin
 		if ( reset_in == 1'b1 )
 			begin
-				state <= S_IDLE;
+				state <= S_RESET;
 				count <= 32'h0;
 				chanAddr <= 7'h00;
 				isWrite <= 1'b0;
@@ -109,6 +111,7 @@ module
 		fx2PktEnd_out = 1'b1;         // inactive: FPGA does not commit a short packet.
 		f2hReady_out = 1'b0;
 		h2fValid_out = 1'b0;
+		reset_out = 1'b0;
 
 		case ( state )
 			S_GET_COUNT0:
@@ -222,6 +225,18 @@ module
 						fifoOp = FIFO_NOP;
 				end
 
+			// S_RESET - tri-state everything
+			S_RESET:
+				begin
+					reset_out = 1'b1;
+					driveBus = 1'b0;
+					fifoOp = 2'bZZ;
+					fx2FifoSel_out = 1'bZ;
+					fx2PktEnd_out = 1'bZ;
+					if ( fx2GotData_in == 1'b0 )
+						state_next = S_IDLE;
+				end
+			
 			// S_IDLE and others
 			default:
 				begin
