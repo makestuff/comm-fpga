@@ -22,7 +22,7 @@ use ieee.std_logic_textio.all;
 use std.textio.all;
 
 entity comm_fpga_epp_tb is
-end comm_fpga_epp_tb;
+end entity;
 
 architecture behavioural of comm_fpga_epp_tb is
 	-- Clocks

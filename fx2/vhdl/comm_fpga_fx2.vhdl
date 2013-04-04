@@ -51,7 +51,7 @@ entity comm_fpga_fx2 is
 		f2hValid_in    : in    std_logic;                     -- channel logic can drive this low to say "I don't have data ready for you"
 		f2hReady_out   : out   std_logic                      -- '1' means "on the next clock rising edge, put your next byte of data on f2hData_in"
 	);
-end comm_fpga_fx2;
+end entity;
 
 architecture rtl of comm_fpga_fx2 is
 	-- The read/write nomenclature here refers to the FPGA reading and writing the FX2LP FIFOs, and is therefore
@@ -245,4 +245,4 @@ begin
 	h2fData_out <= fx2Data_io;
 	fx2Data_io <= dataOut when driveBus = '1' else (others => 'Z');
 
-end rtl;
+end architecture;

@@ -44,9 +44,9 @@ entity comm_fpga_epp is
 		f2hValid_in    : in    std_logic;                     -- channel logic can drive this low to say "I don't have data ready for you"
 		f2hReady_out   : out   std_logic                      -- '1' means "on the next clock rising edge, put your next byte of data on f2hData_in"
 	);
-end comm_fpga_epp;
+end entity;
 
-architecture behavioural of comm_fpga_epp is
+architecture rtl of comm_fpga_epp is
 	type StateType is (
 		S_IDLE,
 		S_ADDR_WRITE_WAIT,
@@ -169,4 +169,4 @@ begin
 	eppData_io <=
 		eppData when ( eppWrite_in = '1' ) else
 		"ZZZZZZZZ";
-end behavioural;
+end architecture;
