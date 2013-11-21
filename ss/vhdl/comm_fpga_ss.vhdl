@@ -48,7 +48,8 @@ architecture rtl of comm_fpga_ss is
 		S_IDLE,        -- wait for requst from host & regster isRead & chanAddr
 		S_GET_COUNT,   -- wait for the byte count
 		S_WRITE,       -- writing data to FPGA application
-		S_BEGIN_READ,  -- wait for microcontroller to be ready for data
+		S_WAIT_STOP,  -- wait for microcontroller to be ready for data
+		S_WAIT_READ,
 		S_READ,        -- reading data from FPGA application
 		S_END_READ     -- wait for microcontroller to stop reading
 	);
@@ -60,6 +61,7 @@ architecture rtl of comm_fpga_ss is
 	signal isRead_next    : std_logic;
 	signal chanAddr       : std_logic_vector(6 downto 0) := (others => '0');
 	signal chanAddr_next  : std_logic_vector(6 downto 0);
+	signal serData_sync   : std_logic;
 	signal serClk_sync    : std_logic;
 	signal serClk_prev    : std_logic;
 	signal serDataIn      : std_logic;
@@ -68,28 +70,31 @@ architecture rtl of comm_fpga_ss is
 	signal serClkFE       : std_logic;
 	signal recvData       : std_logic_vector(7 downto 0);
 	signal recvValid      : std_logic;
+	signal sendValid      : std_logic;
 	signal sendReady      : std_logic;
 	signal fifoInputData  : std_logic_vector(7 downto 0);
 	signal fifoInputValid : std_logic;
-	signal fifoDepth      : std_logic_vector(6 downto 0);
+	signal fifoDepth      : std_logic_vector(2 downto 0);
+	signal writeThrottle  : std_logic;
 begin
 	-- Infer registers
 	process(clk_in)
 	begin
 		if ( rising_edge(clk_in) ) then
-			state       <= state_next;
-			count       <= count_next;
-			isRead      <= isRead_next;
-			chanAddr    <= chanAddr_next;
-			serClk_sync <= serClk_in;
-			serClk_prev <= serClk_sync;
+			state        <= state_next;
+			count        <= count_next;
+			isRead       <= isRead_next;
+			chanAddr     <= chanAddr_next;
+			serClk_sync  <= serClk_in;
+			serClk_prev  <= serClk_sync;
+			serData_sync <= serData_in;
 		end if;
 	end process;
 
 	-- Next state logic
 	process(
-		state, count, recvData, recvValid, sendReady, f2hValid_in, serDataOut, serData_in,
-		fifoDepth, isRead, chanAddr)
+		state, count, recvData, recvValid, sendReady, f2hValid_in, serDataOut, serData_sync,
+		fifoDepth, isRead, chanAddr, writeThrottle)
 	begin
 		state_next     <= state;
 		count_next     <= count;
@@ -97,12 +102,14 @@ begin
 		chanAddr_next  <= chanAddr;
 		fifoInputData  <= (others => 'X');
 		fifoInputValid <= '0';
-		serData_out    <= serDataOut;
-		serDataIn      <= serData_in;
+		serData_out    <= '1';  -- default not ready
+		serDataIn      <= serData_sync;
 		f2hReady_out   <= '0';
+		sendValid      <= '0';
 		case state is
 			-- Get the number of bytes
 			when S_GET_COUNT =>
+				serData_out <= '0';  -- ready
 				if ( recvValid = '1' ) then
 					if ( recvData(5 downto 0) = "000000" ) then
 						count_next <= "1000000";  -- 64 bytes
@@ -110,7 +117,7 @@ begin
 						count_next <= unsigned("0" & recvData(5 downto 0));
 					end if;
 					if ( isRead = '1' ) then
-						state_next <= S_BEGIN_READ;
+						state_next <= S_WAIT_STOP;
 					else
 						state_next <= S_WRITE;
 					end if;
@@ -118,6 +125,7 @@ begin
 				
 			-- Host is writing
 			when S_WRITE =>
+				serData_out <= writeThrottle;
 				if ( recvValid = '1' ) then
 					-- We got a byte from the host - it's a data byte
 					fifoInputData <= recvData;
@@ -128,11 +136,20 @@ begin
 					end if;
 				end if;
 
-			-- Wait for microcontroller ready
-			when S_BEGIN_READ =>
+			-- Wait for the stop bit
+			when S_WAIT_STOP =>
 				serDataIn <= '1';  -- disconnect sync-recv unit from serData_in
 				serData_out <= '1';  -- we'll start writing soon
-				if ( serData_in = '0' ) then
+				if ( serData_sync = '1' ) then
+					-- Other side has started its stop bit
+					state_next <= S_WAIT_READ;
+				end if;
+
+			-- Wait for microcontroller ready
+			when S_WAIT_READ =>
+				serDataIn <= '1';  -- disconnect sync-recv unit from serData_in
+				serData_out <= '1';  -- we'll start writing soon
+				if ( serData_sync = '0' ) then
 					-- Other side is ready to receive
 					state_next <= S_READ;
 				end if;
@@ -140,8 +157,10 @@ begin
 			-- Send data
 			when S_READ =>
 				serDataIn <= '1';  -- disconnect sync-recv unit from serData_in
+				serData_out <= serDataOut;
 				f2hReady_out <= sendReady;
-				if ( f2hValid_in = '1' ) then
+				sendValid <= f2hValid_in;
+				if ( f2hValid_in = '1' and sendReady = '1' ) then
 					count_next <= count - 1;
 					if ( count = 1 ) then
 						state_next <= S_END_READ;
@@ -150,17 +169,16 @@ begin
 
 			when S_END_READ =>
 				serDataIn <= '1';  -- disconnect sync-recv unit from serData_in
-				serData_out <= '1';  -- send nothing whilst we wait for microcontroller
-				if ( serData_in = '1' ) then
+				serData_out <= serDataOut;
+				if ( serData_sync = '1' ) then
 					-- Other side has finished receiving
 					state_next <= S_IDLE;
 				end if;
 				
 			-- S_IDLE and others
 			when others =>
-				if ( fifoDepth = "0000000" ) then
-					-- We're ready to accept another command
-					serData_out <= '0';  -- tell microcontroller we're ready
+				if ( fifoDepth = "000" ) then
+					serData_out <= '0';  -- OK maybe we're ready after all
 					if ( recvValid = '1' ) then
 						-- We got a byte from the host - it's a message length
 						isRead_next <= recvData(7);
@@ -181,6 +199,11 @@ begin
 
 	-- Drive out channel
 	chanAddr_out <= chanAddr;
+
+	-- Throttle writes
+	writeThrottle <=
+		'1' when to_integer(unsigned(fifoDepth)) > 1
+		else '0';
 	
 	sync_send: entity work.sync_send
 		port map(
@@ -192,7 +215,7 @@ begin
 
 			-- Parallel in
 			sendData_in   => f2hData_in,
-			sendValid_in  => f2hValid_in,
+			sendValid_in  => sendValid,
 			sendReady_out => sendReady
 		);
 	
@@ -212,7 +235,7 @@ begin
 	write_fifo: entity work.fifo
 		generic map(
 			WIDTH => 8,
-			DEPTH => 6
+			DEPTH => 2
 		)
 		port map(
 			clk_in          => clk_in,
