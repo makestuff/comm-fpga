@@ -136,8 +136,11 @@ begin
 			wait until falling_edge(serDataOut);
 			wait until rising_edge(serClk);
 		end if;
-		sendByte(x"00");  -- dir bit & channel
-		sendByte(x"3F");  -- length
+		sendByte(x"00");   -- dir bit & channel
+		sendByte(x"00");   -- length high byte
+		sendByte(x"00");   -- length high mid byte
+		sendByte(x"00");   -- length low mid byte
+		sendByte(x"3F");   -- length low byte
 		sendByte(x"00"); sendByte(x"01"); sendByte(x"02"); sendByte(x"03"); sendByte(x"04"); sendByte(x"05"); sendByte(x"06"); sendByte(x"07"); sendByte(x"08"); sendByte(x"09"); sendByte(x"0A"); sendByte(x"0B"); sendByte(x"0C"); sendByte(x"0D"); sendByte(x"0E"); sendByte(x"0F");
 		sendByte(x"10"); sendByte(x"11"); sendByte(x"12"); sendByte(x"13"); sendByte(x"14"); sendByte(x"15"); sendByte(x"16"); sendByte(x"17"); sendByte(x"18"); sendByte(x"19"); sendByte(x"1A"); sendByte(x"1B"); sendByte(x"1C"); sendByte(x"1D"); sendByte(x"1E"); sendByte(x"1F");
 		sendByte(x"20"); sendByte(x"21"); sendByte(x"22"); sendByte(x"23"); sendByte(x"24"); sendByte(x"25"); sendByte(x"26"); sendByte(x"27"); sendByte(x"28"); sendByte(x"29"); sendByte(x"2A"); sendByte(x"2B"); sendByte(x"2C"); sendByte(x"2D"); sendByte(x"2E"); sendByte(x"2F");
@@ -149,7 +152,10 @@ begin
 			wait until rising_edge(serClk);
 		end if;
 		sendByte(x"00");
-		sendByte(x"04");
+		sendByte(x"00");   -- length high byte
+		sendByte(x"00");   -- length high mid byte
+		sendByte(x"00");   -- length low mid byte
+		sendByte(x"04");   -- length low byte
 		sendByte(x"55");sendByte(x"50");sendByte(x"AA");sendByte(x"A0");
 
 		-- Send third packet (read four bytes)
@@ -158,7 +164,10 @@ begin
 			wait until rising_edge(serClk);
 		end if;
 		sendByte(x"80");
-		sendByte(x"04");
+		sendByte(x"00");   -- length high byte
+		sendByte(x"00");   -- length high mid byte
+		sendByte(x"00");   -- length low mid byte
+		sendByte(x"04");   -- length low byte
 		serDataIn <= '0';  -- "I'm ready to receive"
 		pause(4*8+8);
 		serDataIn <= '1';  -- "I've finished receiving"
