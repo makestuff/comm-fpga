@@ -20,32 +20,39 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 entity comm_fpga_ss is
+	generic (
+		DELAY_COUNT : natural := 3  -- cycles to delay sender
+	);
 	port(
-		clk_in       : in  std_logic;
+		clk_in       : in  std_logic;                     -- clock input (asynchronous with serial signals)
+		reset_in     : in  std_logic;                     -- synchronous active-high reset input
+		reset_out    : out std_logic;                     -- synchronous active-high reset output
 		
 		-- Serial interface --------------------------------------------------------------------------
-		serClk_in    : in  std_logic;
-		serData_in   : in  std_logic;
-		serData_out  : out std_logic;
+		serClk_in    : in  std_logic;                     -- serial clock (must have Freq < clk_in/2)
+		serData_in   : in  std_logic;                     -- connected to Tx of microcontroller
+		serData_out  : out std_logic;                     -- connected to Tx of microcontroller
 		
 		-- Channel read/write interface --------------------------------------------------------------
-		chanAddr_out : out std_logic_vector(6 downto 0);
+		chanAddr_out : out std_logic_vector(6 downto 0);  -- the selected channel (0-127)
 		
 		-- Host >> FPGA pipe:
-		h2fData_out  : out std_logic_vector(7 downto 0);
-		h2fValid_out : out std_logic;
-		h2fReady_in  : in  std_logic;
+		h2fData_out  : out std_logic_vector(7 downto 0);  -- data lines used when the host writes to a channel
+		h2fValid_out : out std_logic;                     -- '1' means "on the next clock rising edge, please accept the data on h2fData_out"
+		h2fReady_in  : in  std_logic;                     -- channel logic can drive this low to say "I'm not ready for more data yet"
 		
 		-- Host << FPGA pipe:
-		f2hData_in   : in  std_logic_vector(7 downto 0);
-		f2hValid_in  : in  std_logic;
-		f2hReady_out : out std_logic
+		f2hData_in   : in  std_logic_vector(7 downto 0);  -- data lines used when the host reads from a channel
+		f2hValid_in  : in  std_logic;                     -- channel logic can drive this low to say "I don't have data ready for you"
+		f2hReady_out : out std_logic                      -- '1' means "on the next clock rising edge, put your next byte of data on f2hData_in"
 	);
 end entity;
 
 architecture rtl of comm_fpga_ss is
 	type StateType is (
 		S_IDLE,        -- wait for requst from host & regster isRead & chanAddr
+		S_RESET0,      -- starts here, waits for serData_in low
+		S_RESET1,      -- waits for serData_in high, goes to S_IDLE
 		S_GET_COUNT0,  -- wait for count high byte
 		S_GET_COUNT1,  -- wait for count high mid byte
 		S_GET_COUNT2,  -- wait for count low mid byte
@@ -56,7 +63,7 @@ architecture rtl of comm_fpga_ss is
 		S_READ,        -- send data to microcontroller
 		S_END_READ     -- wait for micro to deassert serData_sync, indicating acknowledgement
 	);
-	signal state          : StateType := S_IDLE;
+	signal state          : StateType := S_RESET0;
 	signal state_next     : StateType;
 	signal count          : unsigned(31 downto 0) := (others => '0');
 	signal count_next     : unsigned(31 downto 0);
@@ -64,12 +71,12 @@ architecture rtl of comm_fpga_ss is
 	signal isRead_next    : std_logic;
 	signal chanAddr       : std_logic_vector(6 downto 0) := (others => '0');
 	signal chanAddr_next  : std_logic_vector(6 downto 0);
-	signal serData_sync   : std_logic;
-	signal serClk_sync    : std_logic;
-	signal serClk_prev    : std_logic;
+	signal delayLine      : std_logic_vector(DELAY_COUNT downto 0) := (others => '0');
+	signal serData_sync   : std_logic := '1';
+	signal serClk_sync    : std_logic := '0';
+	signal serClk_prev    : std_logic := '0';
 	signal serDataIn      : std_logic;
 	signal serDataOut     : std_logic;
-	signal serClkRE       : std_logic;
 	signal serClkFE       : std_logic;
 	signal recvData       : std_logic_vector(7 downto 0);
 	signal recvValid      : std_logic;
@@ -84,13 +91,25 @@ begin
 	process(clk_in)
 	begin
 		if ( rising_edge(clk_in) ) then
-			state        <= state_next;
-			count        <= count_next;
-			isRead       <= isRead_next;
-			chanAddr     <= chanAddr_next;
-			serClk_sync  <= serClk_in;
-			serClk_prev  <= serClk_sync;
-			serData_sync <= serData_in;
+			if ( reset_in = '1' ) then
+				state        <= S_RESET0;
+				count        <= (others => '0');
+				isRead       <= '0';
+				chanAddr     <= (others => '0');
+				serClk_sync  <= '0';
+				serClk_prev  <= '0';
+				serData_sync <= '1';
+				delayLine    <= (others => '0');
+			else
+				state        <= state_next;
+				count        <= count_next;
+				isRead       <= isRead_next;
+				chanAddr     <= chanAddr_next;
+				serClk_sync  <= serClk_in;
+				serClk_prev  <= serClk_sync;
+				serData_sync <= serData_in;
+				delayLine    <= delayLine(DELAY_COUNT-1 downto 0) & serClkFE;
+			end if;
 		end if;
 	end process;
 	
@@ -109,6 +128,7 @@ begin
 		serDataIn      <= serData_sync;
 		f2hReady_out   <= '0';
 		sendValid      <= '0';
+		reset_out      <= '0';
 		case state is
 			-- Get the count high byte
 			when S_GET_COUNT0 =>
@@ -201,6 +221,22 @@ begin
 					state_next <= S_IDLE;
 				end if;
 			
+			-- S_RESET0
+			when S_RESET0 =>
+				reset_out <= '1';
+				serDataIn <= '1';  -- isolate sync-recv unit from serData_in
+				if ( serData_sync = '0' ) then
+					state_next <= S_RESET1;
+				end if;
+
+			-- S_RESET1
+			when S_RESET1 =>
+				reset_out <= '1';
+				serDataIn <= '1';  -- isolate sync-recv unit from serData_in
+				if ( serData_sync = '1' ) then
+					state_next <= S_IDLE;
+				end if;
+
 			-- S_IDLE and others
 			when others =>
 				if ( fifoDepth = "000" ) then
@@ -215,10 +251,7 @@ begin
 		end case;
 	end process;
 	
-	-- Clock edges, rising and falling:
-	serClkRE <=
-		'1' when serClk_sync = '1' and serClk_prev = '0'
-		else '0';
+	-- Clock falling edge flag
 	serClkFE <=
 		'1' when serClk_sync = '0' and serClk_prev = '1'
 		else '0';
@@ -237,7 +270,7 @@ begin
 			clk_in        => clk_in,
 			
 			-- Serial out
-			serClkRE_in   => serClkRE,
+			serClkRE_in   => delayLine(DELAY_COUNT),
 			serData_out   => serDataOut,
 			
 			-- Parallel in

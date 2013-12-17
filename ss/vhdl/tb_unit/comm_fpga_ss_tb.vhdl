@@ -58,6 +58,7 @@ begin
 	uut: entity work.comm_fpga_ss
 		port map(
 			clk_in        => sysClk,
+			reset_in      => '0',
 
 			-- Serial interface
 			serClk_in     => serClk,
@@ -128,6 +129,10 @@ begin
 			wait until rising_edge(serClk);
 		end procedure;
 	begin
+		serDataIn <= '1';
+		pause(4);
+		serDataIn <= '0';
+		pause(4);
 		serDataIn <= '1';
 		pause(4);
 
