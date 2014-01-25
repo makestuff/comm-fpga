@@ -21,12 +21,11 @@ use ieee.numeric_std.all;
 
 entity comm_fpga_ss is
 	generic (
-		DELAY_COUNT : natural := 3  -- cycles to delay sender
+		DELAY_COUNT : natural := 3  -- cycles to delay rising edge signal for sender
 	);
 	port(
 		clk_in       : in  std_logic;                     -- clock input (asynchronous with serial signals)
 		reset_in     : in  std_logic;                     -- synchronous active-high reset input
-		reset_out    : out std_logic;                     -- synchronous active-high reset output
 		
 		-- Serial interface --------------------------------------------------------------------------
 		serClk_in    : in  std_logic;                     -- serial clock (must have Freq < clk_in/2)
@@ -51,8 +50,6 @@ end entity;
 architecture rtl of comm_fpga_ss is
 	type StateType is (
 		S_IDLE,        -- wait for requst from host & regster isRead & chanAddr
-		S_RESET0,      -- starts here, waits for serData_in low
-		S_RESET1,      -- waits for serData_in high, goes to S_IDLE
 		S_GET_COUNT0,  -- wait for count high byte
 		S_GET_COUNT1,  -- wait for count high mid byte
 		S_GET_COUNT2,  -- wait for count low mid byte
@@ -63,7 +60,7 @@ architecture rtl of comm_fpga_ss is
 		S_READ,        -- send data to microcontroller
 		S_END_READ     -- wait for micro to deassert serData_sync, indicating acknowledgement
 	);
-	signal state          : StateType := S_RESET0;
+	signal state          : StateType := S_IDLE;
 	signal state_next     : StateType;
 	signal count          : unsigned(31 downto 0) := (others => '0');
 	signal count_next     : unsigned(31 downto 0);
@@ -92,7 +89,7 @@ begin
 	begin
 		if ( rising_edge(clk_in) ) then
 			if ( reset_in = '1' ) then
-				state        <= S_RESET0;
+				state        <= S_IDLE;
 				count        <= (others => '0');
 				isRead       <= '0';
 				chanAddr     <= (others => '0');
@@ -128,7 +125,6 @@ begin
 		serDataIn      <= serData_sync;
 		f2hReady_out   <= '0';
 		sendValid      <= '0';
-		reset_out      <= '0';
 		case state is
 			-- Get the count high byte
 			when S_GET_COUNT0 =>
@@ -221,22 +217,6 @@ begin
 					state_next <= S_IDLE;
 				end if;
 			
-			-- S_RESET0
-			when S_RESET0 =>
-				reset_out <= '1';
-				serDataIn <= '1';  -- isolate sync-recv unit from serData_in
-				if ( serData_sync = '0' ) then
-					state_next <= S_RESET1;
-				end if;
-
-			-- S_RESET1
-			when S_RESET1 =>
-				reset_out <= '1';
-				serDataIn <= '1';  -- isolate sync-recv unit from serData_in
-				if ( serData_sync = '1' ) then
-					state_next <= S_IDLE;
-				end if;
-
 			-- S_IDLE and others
 			when others =>
 				if ( fifoDepth = "000" ) then
