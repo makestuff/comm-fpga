@@ -21,7 +21,8 @@ use ieee.numeric_std.all;
 
 entity comm_fpga_ss is
 	generic (
-		DELAY_COUNT : natural := 3  -- cycles to delay rising edge signal for sender
+		DELAY_COUNT : natural := 3; -- cycles to delay rising edge signal for sender
+		FIFO_DEPTH  : natural := 1  -- 2**DEPTH gives number of words in FIFO
 	);
 	port(
 		clk_in       : in  std_logic;                     -- clock input (asynchronous with serial signals)
@@ -60,29 +61,28 @@ architecture rtl of comm_fpga_ss is
 		S_READ,        -- send data to microcontroller
 		S_END_READ     -- wait for micro to deassert serData_sync, indicating acknowledgement
 	);
-	signal state          : StateType := S_IDLE;
-	signal state_next     : StateType;
-	signal count          : unsigned(31 downto 0) := (others => '0');
-	signal count_next     : unsigned(31 downto 0);
-	signal isRead         : std_logic := '0';
-	signal isRead_next    : std_logic;
-	signal chanAddr       : std_logic_vector(6 downto 0) := (others => '0');
-	signal chanAddr_next  : std_logic_vector(6 downto 0);
-	signal delayLine      : std_logic_vector(DELAY_COUNT downto 0) := (others => '0');
-	signal serData_sync   : std_logic := '1';
-	signal serClk_sync    : std_logic := '0';
-	signal serClk_prev    : std_logic := '0';
-	signal serDataIn      : std_logic;
-	signal serDataOut     : std_logic;
-	signal serClkFE       : std_logic;
-	signal recvData       : std_logic_vector(7 downto 0);
-	signal recvValid      : std_logic;
-	signal sendValid      : std_logic;
-	signal sendReady      : std_logic;
-	signal fifoInputData  : std_logic_vector(7 downto 0);
-	signal fifoInputValid : std_logic;
-	signal fifoDepth      : std_logic_vector(2 downto 0);
-	signal writeThrottle  : std_logic;
+	signal state           : StateType := S_IDLE;
+	signal state_next      : StateType;
+	signal count           : unsigned(31 downto 0) := (others => '0');
+	signal count_next      : unsigned(31 downto 0);
+	signal isRead          : std_logic := '0';
+	signal isRead_next     : std_logic;
+	signal chanAddr        : std_logic_vector(6 downto 0) := (others => '0');
+	signal chanAddr_next   : std_logic_vector(6 downto 0);
+	signal delayLine       : std_logic_vector(DELAY_COUNT downto 0) := (others => '0');
+	signal serData_sync    : std_logic := '1';
+	signal serClk_sync     : std_logic := '0';
+	signal serClk_prev     : std_logic := '0';
+	signal serDataIn       : std_logic;
+	signal serDataOut      : std_logic;
+	signal serClkFE        : std_logic;
+	signal recvData        : std_logic_vector(7 downto 0);
+	signal recvValid       : std_logic;
+	signal sendValid       : std_logic;
+	signal sendReady       : std_logic;
+	signal fifoInputData   : std_logic_vector(7 downto 0);
+	signal fifoInputValid  : std_logic;
+	signal fifoOutputValid : std_logic;
 begin
 	-- Infer registers
 	process(clk_in)
@@ -113,7 +113,7 @@ begin
 	-- Next state logic
 	process(
 		state, count, recvData, recvValid, sendReady, f2hValid_in, serDataOut, serData_sync,
-		fifoDepth, isRead, chanAddr, writeThrottle)
+		isRead, chanAddr, fifoOutputValid)
 	begin
 		state_next     <= state;
 		count_next     <= count;
@@ -164,7 +164,7 @@ begin
 			
 			-- Host is writing
 			when S_WRITE =>
-				serData_out <= writeThrottle;
+				serData_out <= fifoOutputValid;
 				if ( recvValid = '1' ) then
 					-- We got a data byte from the host
 					fifoInputData <= recvData;
@@ -219,14 +219,15 @@ begin
 			
 			-- S_IDLE and others
 			when others =>
-				if ( fifoDepth = "000" ) then
-					serData_out <= '0';  -- OK maybe we're ready after all
-					if ( recvValid = '1' ) then
-						-- We got a byte from the host - it's a message length
-						isRead_next <= recvData(7);
-						chanAddr_next <= recvData(6 downto 0);
-						state_next <= S_GET_COUNT0;
-					end if;
+				-- Need to hold off the micro sending us any more commands until the write FIFO is
+				-- completely empty, otherwise we might end up writing the tail end of the previous
+				-- write to the new channel.
+				serData_out <= fifoOutputValid;
+				if ( recvValid = '1' ) then
+					-- We got a byte from the host - it's a message length
+					isRead_next <= recvData(7);
+					chanAddr_next <= recvData(6 downto 0);
+					state_next <= S_GET_COUNT0;
 				end if;
 		end case;
 	end process;
@@ -236,13 +237,11 @@ begin
 		'1' when serClk_sync = '0' and serClk_prev = '1'
 		else '0';
 	
-	-- Drive out channel
+	-- Tell application which channel we're talking to
 	chanAddr_out <= chanAddr;
 	
-	-- Throttle writes
-	writeThrottle <=
-		'1' when to_integer(unsigned(fifoDepth)) > 1
-		else '0';
+	-- Tell application when there's data for it to read
+	h2fValid_out <= fifoOutputValid;
 	
 	-- Synchronous serial send unit
 	sync_send: entity work.sync_send
@@ -277,12 +276,12 @@ begin
 	write_fifo: entity work.fifo
 		generic map(
 			WIDTH => 8,
-			DEPTH => 2
+			DEPTH => FIFO_DEPTH
 		)
 		port map(
 			clk_in          => clk_in,
 			reset_in        => '0',
-			depth_out       => fifoDepth,
+			depth_out       => open,
 			
 			-- Input pipe
 			inputData_in    => fifoInputData,
@@ -291,7 +290,7 @@ begin
 			
 			-- Output pipe
 			outputData_out  => h2fData_out,
-			outputValid_out => h2fValid_out,
+			outputValid_out => fifoOutputValid,
 			outputReady_in  => h2fReady_in
 		);
 end architecture;

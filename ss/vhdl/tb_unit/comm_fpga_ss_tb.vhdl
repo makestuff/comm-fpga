@@ -56,6 +56,9 @@ architecture behavioural of comm_fpga_ss_tb is
 begin
 	-- Instantiate comm_fpga_ss for testing
 	uut: entity work.comm_fpga_ss
+		generic map(
+			FIFO_DEPTH    => 1
+		)
 		port map(
 			clk_in        => sysClk,
 			reset_in      => '0',
@@ -116,6 +119,10 @@ begin
 	process
 		procedure sendByte(constant b : in std_logic_vector(7 downto 0)) is
 		begin
+			if ( serDataOut = '1' ) then
+				wait until falling_edge(serDataOut);
+				wait until rising_edge(serClk);
+			end if;
 			serDataIn <= '0';   -- start bit
 			wait until rising_edge(serClk); serDataIn <= b(0);  -- bit 0
 			wait until rising_edge(serClk); serDataIn <= b(1);  -- bit 1
@@ -129,10 +136,6 @@ begin
 			wait until rising_edge(serClk);
 		end procedure;
 	begin
-		serDataIn <= '1';
-		pause(4);
-		serDataIn <= '0';
-		pause(4);
 		serDataIn <= '1';
 		pause(4);
 
@@ -172,47 +175,52 @@ begin
 		sendByte(x"00");   -- length high byte
 		sendByte(x"00");   -- length high mid byte
 		sendByte(x"00");   -- length low mid byte
-		sendByte(x"04");   -- length low byte
+		sendByte(x"10");   -- length low byte
 		serDataIn <= '0';  -- "I'm ready to receive"
-		pause(4*8+8);
+		pause(16*10);
 		serDataIn <= '1';  -- "I've finished receiving"
 		wait;
 	end process;
 
 	-- Drive the FPGA->Host pipe
 	process
+		procedure sendByte(constant b : in std_logic_vector(7 downto 0)) is
+		begin
+			wait until rising_edge(f2hReady);
+			f2hData <= b;
+			f2hValid <= '1';
+			wait until falling_edge(f2hReady);
+			f2hData <= (others => 'X');
+			f2hValid <= '0';
+		end procedure;
 	begin
 		f2hData <= (others => 'X');
 		f2hValid <= '0';
 
-		wait until rising_edge(f2hReady);
-		pause(4);
-		f2hData <= x"55";
-		f2hValid <= '1';
-		wait until falling_edge(f2hReady);
-		f2hData <= (others => 'X');
-		f2hValid <= '0';
+		sendByte(x"01");
+		sendByte(x"02");
+		sendByte(x"03");
+		sendByte(x"04");
 
-		wait until rising_edge(f2hReady);
-		f2hData <= x"50";
-		f2hValid <= '1';
-		wait until falling_edge(f2hReady);
-		f2hData <= (others => 'X');
-		f2hValid <= '0';
+		sendByte(x"05");
+		sendByte(x"06");
+		sendByte(x"07");
+		sendByte(x"08");
 
-		wait until rising_edge(f2hReady);
-		f2hData <= x"AA";
-		f2hValid <= '1';
-		wait until falling_edge(f2hReady);
-		f2hData <= (others => 'X');
-		f2hValid <= '0';
-
-		wait until rising_edge(f2hReady);
-		f2hData <= x"A0";
-		f2hValid <= '1';
-		wait until falling_edge(f2hReady);
-		f2hData <= (others => 'X');
-		f2hValid <= '0';
+		sendByte(x"09");
+		sendByte(x"0a");
+		sendByte(x"0b");
+		sendByte(x"0c");
+		
+		sendByte(x"0d");
+		sendByte(x"0e");
+		sendByte(x"0f");
+		sendByte(x"10");
+		
+		sendByte(x"11");
+		sendByte(x"12");
+		sendByte(x"13");
+		sendByte(x"14");
 		wait;
 	end process;
 	
@@ -220,7 +228,7 @@ begin
 	process
 	begin
 		h2fReady <= '0';
-		wait for 110 us;
+		wait for 20 us;
 		h2fReady <= '1';
 		wait;
 	end process;
