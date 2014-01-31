@@ -52,9 +52,7 @@ architecture rtl of comm_fpga_ss is
 	type StateType is (
 		S_IDLE,        -- wait for requst from host & regster isRead & chanAddr
 		S_GET_COUNT0,  -- wait for count high byte
-		S_GET_COUNT1,  -- wait for count high mid byte
-		S_GET_COUNT2,  -- wait for count low mid byte
-		S_GET_COUNT3,  -- wait for count low byte
+		S_GET_COUNT1,  -- wait for count low byte
 		S_WRITE,       -- writing data to FPGA application
 		S_WAIT_STOP,   -- wait for the stop bit in preparation for a read
 		S_WAIT_READ,   -- wait for microcontroller to assert serData_sync, indicating readiness
@@ -63,8 +61,8 @@ architecture rtl of comm_fpga_ss is
 	);
 	signal state           : StateType := S_IDLE;
 	signal state_next      : StateType;
-	signal count           : unsigned(31 downto 0) := (others => '0');
-	signal count_next      : unsigned(31 downto 0);
+	signal count           : unsigned(16 downto 0) := (others => '0');
+	signal count_next      : unsigned(16 downto 0);
 	signal isRead          : std_logic := '0';
 	signal isRead_next     : std_logic;
 	signal chanAddr        : std_logic_vector(6 downto 0) := (others => '0');
@@ -130,31 +128,20 @@ begin
 			when S_GET_COUNT0 =>
 				serData_out <= '0';  -- ready
 				if ( recvValid = '1' ) then
-					count_next(31 downto 24) <= unsigned(recvData);
+					count_next(15 downto 8) <= unsigned(recvData);
 					state_next <= S_GET_COUNT1;
 				end if;
 			
-			-- Get the count high mid byte
+			-- Get the count low byte
 			when S_GET_COUNT1 =>
 				serData_out <= '0';  -- ready
 				if ( recvValid = '1' ) then
-					count_next(23 downto 16) <= unsigned(recvData);
-					state_next <= S_GET_COUNT2;
-				end if;
-			
-			-- Get the count low mid byte
-			when S_GET_COUNT2 =>
-				serData_out <= '0';  -- ready
-				if ( recvValid = '1' ) then
-					count_next(15 downto 8) <= unsigned(recvData);
-					state_next <= S_GET_COUNT3;
-				end if;
-			
-			-- Get the count low byte
-			when S_GET_COUNT3 =>
-				serData_out <= '0';  -- ready
-				if ( recvValid = '1' ) then
 					count_next(7 downto 0) <= unsigned(recvData);
+					if ( count(15 downto 8) = x"00" and recvData = x"00" ) then
+						count_next(16) <= '1';
+					else
+						count_next(16) <= '0';
+					end if;
 					if ( isRead = '1' ) then
 						state_next <= S_WAIT_STOP;
 					else
