@@ -53,9 +53,7 @@ module
 	localparam[3:0] S_RESET                   = 4'h0;     // wait for gotData_in to go low when FX2LP enables FIFO mode
 	localparam[3:0] S_IDLE                    = 4'h1;     // wait for requst from host & register chanAddr & isWrite
 	localparam[3:0] S_GET_COUNT0              = 4'h2;     // register most significant byte of message length
-	localparam[3:0] S_GET_COUNT1              = 4'h3;     // register next byte of message length
-	localparam[3:0] S_GET_COUNT2              = 4'h4;     // register next byte of message length
-	localparam[3:0] S_GET_COUNT3              = 4'h5;     // register least significant byte of message length
+	localparam[3:0] S_GET_COUNT1              = 4'h3;     // register least significant byte of message length
 	localparam[3:0] S_BEGIN_WRITE             = 4'h6;     // switch direction of FX2LP data bus
 	localparam[3:0] S_WRITE                   = 4'h7;     // write data to FX2LP EP6IN FIFO, one byte at a time
 	localparam[3:0] S_END_WRITE_ALIGNED       = 4'h8;     // end an aligned write (do not assert fx2PktEnd_out)
@@ -69,7 +67,7 @@ module
 	localparam      IN_FIFO                   = 2'b1;     // EP6IN
 	reg[3:0]        state_next, state         = S_RESET;
 	reg[1:0]        fifoOp                    = 2'bZZ;
-	reg[31:0]       count_next, count         = 32'h0;    // read/write count
+	reg[16:0]       count_next, count         = 17'h0;    // read/write count
 	reg[6:0]        chanAddr_next, chanAddr   = 7'h00;    // channel being accessed (0-127)
 	reg             isWrite_next, isWrite     = 1'b0;     // is this FX2LP FIFO access a write or a read?
 	reg             isAligned_next, isAligned = 1'b0;     // is this FX2LP FIFO write block-aligned?
@@ -82,7 +80,7 @@ module
 		if ( reset_in == 1'b1 )
 			begin
 				state <= S_RESET;
-				count <= 32'h0;
+				count <= 17'h0;
 				chanAddr <= 7'h00;
 				isWrite <= 1'b0;
 				isAligned <= 1'b0;
@@ -120,7 +118,7 @@ module
 					if ( fx2GotData_in == 1'b1 )
 						begin
 							// The count high word high byte will be available on the next clock.
-							count_next[31:24] = fx2Data_io;
+							count_next[15:8] = fx2Data_io;
 							state_next = S_GET_COUNT1;
 						end
 				end
@@ -131,29 +129,11 @@ module
 					if ( fx2GotData_in == 1'b1 )
 						begin
 							// The count high word low byte will be available on the next clock.
-							count_next[23:16] = fx2Data_io;
-							state_next = S_GET_COUNT2;
-						end
-				end
-
-			S_GET_COUNT2:
-				begin
-					fx2FifoSel_out = OUT_FIFO;  // Reading from FX2LP
-					if ( fx2GotData_in == 1'b1 )
-						begin
-							// The count low word high byte will be available on the next clock.
-							count_next[15:8] = fx2Data_io;
-							state_next = S_GET_COUNT3;
-						end
-				end
-
-			S_GET_COUNT3:
-				begin
-					fx2FifoSel_out = OUT_FIFO;  // Reading from FX2LP
-					if ( fx2GotData_in == 1'b1 )
-						begin
-							// The count low word low byte will be available on the next clock.
 							count_next[7:0] = fx2Data_io;
+							if ( count[15:8] == 8'h00 && fx2Data_io == 8'h00 )
+								count_next[16] = 1'b1;
+							else
+								count_next[16] = 1'b0;
 							if ( isWrite == 1'b1 )
 								state_next = S_BEGIN_WRITE;
 							else
