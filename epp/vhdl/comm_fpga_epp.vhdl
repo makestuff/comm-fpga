@@ -49,8 +49,8 @@ end entity;
 
 architecture rtl of comm_fpga_epp is
 	type StateType is (
-		S_IDLE,
 		S_RESET,
+		S_IDLE,
 		S_ADDR_WRITE_WAIT,
 		S_DATA_WRITE_EXEC,
 		S_DATA_WRITE_WAIT,
