@@ -61,9 +61,7 @@ architecture rtl of comm_fpga_fx2 is
 		S_RESET,                 -- wait for gotData_in to go low when FX2LP enables FIFO mode
 		S_IDLE,                  -- wait for requst from host & register chanAddr & isWrite
 		S_GET_COUNT0,            -- register most significant byte of message length
-		S_GET_COUNT1,            -- register next byte of message length
-		S_GET_COUNT2,            -- register next byte of message length
-		S_GET_COUNT3,            -- register least significant byte of message length
+		S_GET_COUNT1,            -- register least significant byte of message length
 		S_BEGIN_WRITE,           -- switch direction of FX2LP data bus
 		S_WRITE,                 -- write data to FX2LP EP6IN FIFO, one byte at a time
 		S_END_WRITE_ALIGNED,     -- end an aligned write (do not assert fx2PktEnd_out)
@@ -77,7 +75,7 @@ architecture rtl of comm_fpga_fx2 is
 	constant IN_FIFO                 : std_logic                    := '1';              -- EP6IN
 	signal state, state_next         : StateType                    := S_RESET;
 	signal fifoOp                    : std_logic_vector(1 downto 0) := "ZZ";
-	signal count, count_next         : unsigned(31 downto 0)        := (others => '0');  -- read/write count
+	signal count, count_next         : unsigned(16 downto 0)        := (others => '0');  -- read/write count
 	signal chanAddr, chanAddr_next   : std_logic_vector(6 downto 0) := (others => '0');  -- channel being accessed (0-127)
 	signal isWrite, isWrite_next     : std_logic                    := '0';              -- is this FX2LP FIFO access a write or a read?
 	signal isAligned, isAligned_next : std_logic                    := '0';              -- is this FX2LP FIFO write block-aligned?
@@ -127,7 +125,7 @@ begin
 				fx2FifoSel_out <= OUT_FIFO;  -- Reading from FX2LP
 				if ( fx2GotData_in = '1' ) then
 					-- The count high word high byte will be available on the next clock edge.
-					count_next(31 downto 24) <= unsigned(fx2Data_io);
+					count_next(15 downto 8) <= unsigned(fx2Data_io);
 					state_next <= S_GET_COUNT1;
 				end if;
 
@@ -135,23 +133,12 @@ begin
 				fx2FifoSel_out <= OUT_FIFO;  -- Reading from FX2LP
 				if ( fx2GotData_in = '1' ) then
 					-- The count high word low byte will be available on the next clock edge.
-					count_next(23 downto 16) <= unsigned(fx2Data_io);
-					state_next <= S_GET_COUNT2;
-				end if;
-
-			when S_GET_COUNT2 =>
-				fx2FifoSel_out <= OUT_FIFO;  -- Reading from FX2LP
-				if ( fx2GotData_in = '1' ) then
-					-- The count low word high byte will be available on the next clock edge.
-					count_next(15 downto 8) <= unsigned(fx2Data_io);
-					state_next <= S_GET_COUNT3;
-				end if;
-
-			when S_GET_COUNT3 =>
-				fx2FifoSel_out <= OUT_FIFO;  -- Reading from FX2LP
-				if ( fx2GotData_in = '1' ) then
-					-- The count low word low byte will be available on the next clock edge.
 					count_next(7 downto 0) <= unsigned(fx2Data_io);
+					if ( count(15 downto 8) = x"00" and fx2Data_io = x"00" ) then
+						count_next(16) <= '1';
+					else
+						count_next(16) <= '0';
+					end if;
 					if ( isWrite = '1' ) then
 						state_next <= S_BEGIN_WRITE;
 					else

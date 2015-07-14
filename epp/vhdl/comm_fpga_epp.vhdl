@@ -22,7 +22,8 @@ use ieee.numeric_std.all;
 entity comm_fpga_epp is
 	port(
 		clk_in         : in    std_logic;                     -- clock input (asynchronous with EPP signals)
-		reset_in       : in    std_logic;                     -- synchronous active-high reset
+		reset_in       : in    std_logic;                     -- synchronous active-high reset input
+		reset_out      : out   std_logic;                     -- synchronous active-high reset output
 
 		-- EPP interface -----------------------------------------------------------------------------
 		eppData_io    : inout std_logic_vector(7 downto 0);   -- bidirectional 8-bit data bus
@@ -48,6 +49,7 @@ end entity;
 
 architecture rtl of comm_fpga_epp is
 	type StateType is (
+		S_RESET,
 		S_IDLE,
 		S_ADDR_WRITE_WAIT,
 		S_DATA_WRITE_EXEC,
@@ -57,38 +59,45 @@ architecture rtl of comm_fpga_epp is
 	);
 
 	-- State and next-state
-	signal state, state_next       : StateType := S_IDLE;
+	signal state           : StateType := S_RESET;
+	signal state_next      : StateType;
 	
 	-- Synchronised versions of asynchronous inputs
-	signal eppAddrStb_sync         : std_logic := '1';
-	signal eppDataStb_sync         : std_logic := '1';
-	signal eppWrite_sync           : std_logic := '1';
+	signal eppAddrStb_sync : std_logic := '1';
+	signal eppDataStb_sync : std_logic := '1';
+	signal eppWrite_sync   : std_logic := '1';
 	
 	-- Registers
-	signal eppWait, eppWait_next   : std_logic := '0';
-	signal chanAddr, chanAddr_next : std_logic_vector(6 downto 0) := (others => '0');
-	signal eppData, eppData_next   : std_logic_vector(7 downto 0) := (others => '0');
+	signal eppWait         : std_logic := '1';
+	signal eppWait_next    : std_logic;
+	signal chanAddr        : std_logic_vector(6 downto 0) := (others => '0');
+	signal chanAddr_next   : std_logic_vector(6 downto 0);
+	signal eppData         : std_logic_vector(7 downto 0) := (others => '0');
+	signal eppData_next    : std_logic_vector(7 downto 0);
+
+	-- Other signals
+	signal driveBus        : std_logic := '0';  -- whether or not to drive eppData_io
 begin
 	-- Infer registers
 	process(clk_in)
 	begin
 		if ( rising_edge(clk_in) ) then
 			if ( reset_in = '1' ) then
-				state <= S_IDLE;
-				chanAddr <= (others => '0');
-				eppData <= (others => '0');
-				eppWait <= '0';
+				state           <= S_RESET;
+				chanAddr        <= (others => '0');
+				eppData         <= (others => '0');
+				eppWait         <= '1';
 				eppAddrStb_sync <= '1';
 				eppDataStb_sync <= '1';
-				eppWrite_sync <= '1';
+				eppWrite_sync   <= '1';
 			else
-				state <= state_next;
-				chanAddr <= chanAddr_next;
-				eppData <= eppData_next;
-				eppWait <= eppWait_next;
+				state           <= state_next;
+				chanAddr        <= chanAddr_next;
+				eppData         <= eppData_next;
+				eppWait         <= eppWait_next;
 				eppAddrStb_sync <= eppAddrStb_in;
 				eppDataStb_sync <= eppDataStb_in;
-				eppWrite_sync <= eppWrite_in;
+				eppWrite_sync   <= eppWrite_in;
 			end if;
 		end if;
 	end process;
@@ -105,7 +114,8 @@ begin
 		h2fData_out <= (others => '0');
 		f2hReady_out <= '0';
 		h2fValid_out <= '0';
-
+		reset_out <= '0';
+		driveBus <= eppWrite_sync;
 		case state is
 			-- Finish the address update cycle
 			when S_ADDR_WRITE_WAIT =>
@@ -141,7 +151,15 @@ begin
 					eppWait_next <= '0';
 					state_next <= S_IDLE;
 				end if;
-
+				
+			-- S_RESET - tri-state everything
+			when S_RESET =>
+				reset_out <= '1';
+				driveBus <= '0';
+				if ( eppWrite_sync = '0' ) then
+					state_next <= S_IDLE;
+				end if;
+				
 			-- S_IDLE and others
 			when others =>
 				eppWait_next <= '0';
@@ -167,6 +185,6 @@ begin
 	chanAddr_out <= chanAddr;
 	eppWait_out <= eppWait;
 	eppData_io <=
-		eppData when ( eppWrite_in = '1' ) else
+		eppData when ( driveBus = '1' ) else
 		"ZZZZZZZZ";
 end architecture;

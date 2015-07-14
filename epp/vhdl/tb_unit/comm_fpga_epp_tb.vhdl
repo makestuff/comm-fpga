@@ -103,77 +103,71 @@ begin
 		eppAddrStb <= '1';
 		eppDataStb <= '1';
 		eppWrite <= '1';
-		wait for 55 ns;
+		wait for 10 ns;
+		eppWrite <= '0';  -- bring it out of RESET
+		wait for 45 ns;
 
 		-- Do address write
 		eppData <= x"55";
-		eppWrite <= '0';
 		wait for 5 ns;
 		eppAddrStb <= '0';
 		wait until eppWait = '1';
 		wait for 5 ns;
 		eppAddrStb <= '1';
 		wait for 5 ns;
-		eppWrite <= '1';
 		eppData <= (others => 'Z');
 		wait until eppWait = '0';
 		wait for 5 ns;
 
 		-- Do data write 1
 		eppData <= x"12";
-		eppWrite <= '0';
 		wait for 5 ns;
 		eppDataStb <= '0';
 		wait until eppWait = '1';
 		wait for 5 ns;
 		eppDataStb <= '1';
 		wait for 5 ns;
-		eppWrite <= '1';
 		eppData <= (others => 'Z');
 		wait until eppWait = '0';
 		wait for 5 ns;
 		
 		-- Do data write 2
 		eppData <= x"34";
-		eppWrite <= '0';
 		wait for 5 ns;
 		eppDataStb <= '0';
 		wait until eppWait = '1';
 		wait for 5 ns;
 		eppDataStb <= '1';
 		wait for 5 ns;
-		eppWrite <= '1';
 		eppData <= (others => 'Z');
 		wait until eppWait = '0';
 		wait for 5 ns;
 		
 		-- Do data write 3
 		eppData <= x"56";
-		eppWrite <= '0';
 		wait for 5 ns;
 		eppDataStb <= '0';
 		wait until eppWait = '1';
 		wait for 5 ns;
 		eppDataStb <= '1';
 		wait for 5 ns;
-		eppWrite <= '1';
 		eppData <= (others => 'Z');
 		wait until eppWait = '0';
 		wait for 5 ns;
 		
 		-- Do data write 4
 		eppData <= x"78";
-		eppWrite <= '0';
 		wait for 5 ns;
 		eppDataStb <= '0';
 		wait until eppWait = '1';
 		wait for 5 ns;
 		eppDataStb <= '1';
 		wait for 5 ns;
-		eppWrite <= '1';
 		eppData <= (others => 'Z');
 		wait until eppWait = '0';
 		wait for 5 ns;
+
+		eppWrite <= '1';  -- reading
 
 		-- Do data read 1
 		eppDataStb <= '0';
@@ -205,6 +199,8 @@ begin
 		wait for 5 ns;
 		eppDataStb <= '1';
 		wait until eppWait = '0';
+
+		eppWrite <= '0';  -- writing again
 
 		wait;
 	end process;

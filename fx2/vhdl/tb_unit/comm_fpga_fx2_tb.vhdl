@@ -120,10 +120,6 @@ begin
 		wait until rising_edge(sysClk);
 		fx2Data <= x"00";
 		wait until rising_edge(sysClk);
-		fx2Data <= x"FF"; wait for 1 ps; fx2Data <= x"00";
-		wait until rising_edge(sysClk);
-		fx2Data <= x"FF"; wait for 1 ps; fx2Data <= x"00";
-		wait until rising_edge(sysClk);
 		fx2Data <= x"04";
 		wait until rising_edge(sysClk);
 		fx2Data <= x"12";
@@ -147,10 +143,6 @@ begin
 		fx2GotData <= '1';
 		wait until rising_edge(sysClk);
 		fx2Data <= x"00";
-		wait until rising_edge(sysClk);
-		fx2Data <= x"FF"; wait for 1 ps; fx2Data <= x"00";
-		wait until rising_edge(sysClk);
-		fx2Data <= x"FF"; wait for 1 ps; fx2Data <= x"00";
 		wait until rising_edge(sysClk);
 		fx2Data <= x"04";
 		wait until rising_edge(sysClk);

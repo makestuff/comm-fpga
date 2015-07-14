@@ -12,11 +12,9 @@ clock, if both valid and ready are high, the eight data bits are transferred
 from the sender to the receiver.
 
 The external interface differs depending on how the microcontroller implementing
-the CommFPGA protocol is wired to the FPGA. Currently there are two separate
-implementations, one using the FX2LP slave FIFO interface and another using the
-Enhanced Parallel Port protocol, currently implemented on the 8-bit AVRs. Future
-implementations will include a synchronous (three-wire) and an asynchronous
-(two-wire) serial protocol implemented on the AVR. This allows designers to
-choose an appropriate board design depending on the requirements. The FX2LP
-solution is extremely fast (~45MB/s) but requires fifteen FPGA I/Os. The AVR-
-based solutions are not as fast, but require fewer FPGA I/Os.
+the CommFPGA protocol is wired to the FPGA. Currently there are three separate
+implementations:
+
+  FX2LP slave-FIFO interface (15 I/Os, ~45MB/s)
+  EPP interface (12 I/Os, ~330KB/s)
+  Synchronous serial interface (3 I/Os, ~650KB/s)

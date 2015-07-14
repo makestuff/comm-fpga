@@ -17,7 +17,8 @@
 module
 	comm_fpga_epp(
 		input  wire      clk_in,          // clock input (asynchronous with EPP signals)
-		input  wire      reset_in,        // synchronous active-high reset
+		input  wire      reset_in,        // synchronous active-high reset input
+		output reg       reset_out,       // synchronous active-high reset output
 
 		// EPP interface -----------------------------------------------------------------------------
 		inout  wire[7:0] eppData_io,      // bidirectional 8-bit data bus
@@ -40,48 +41,56 @@ module
 		output reg       f2hReady_out     // '1' means "on the next clock rising edge, put your next byte of data on f2hData_in"
 	);
 
-	localparam[2:0] S_IDLE             = 3'h0;
-	localparam[2:0] S_ADDR_WRITE_WAIT  = 3'h1;
-	localparam[2:0] S_DATA_WRITE_EXEC  = 3'h2;
-	localparam[2:0] S_DATA_WRITE_WAIT  = 3'h3;
-	localparam[2:0] S_DATA_READ_EXEC   = 3'h4;
-	localparam[2:0] S_DATA_READ_WAIT   = 3'h5;
+	localparam[2:0] S_RESET            = 3'h0;
+	localparam[2:0] S_IDLE             = 3'h1;
+	localparam[2:0] S_ADDR_WRITE_WAIT  = 3'h2;
+	localparam[2:0] S_DATA_WRITE_EXEC  = 3'h3;
+	localparam[2:0] S_DATA_WRITE_WAIT  = 3'h4;
+	localparam[2:0] S_DATA_READ_EXEC   = 3'h5;
+	localparam[2:0] S_DATA_READ_WAIT   = 3'h6;
 
 	// State and next-state
-	reg[2:0] state_next, state         = S_IDLE;
+	reg[2:0] state           = S_RESET;
+	reg[2:0] state_next;
 	
 	// Synchronised versions of asynchronous inputs
-	reg      eppAddrStb_sync           = 1'b1;
-	reg      eppDataStb_sync           = 1'b1;
-	reg      eppWrite_sync             = 1'b1;
+	reg      eppAddrStb_sync = 1'b1;
+	reg      eppDataStb_sync = 1'b1;
+	reg      eppWrite_sync   = 1'b1;
 	
 	// Registers
-	reg      eppWait_next, eppWait     = 1'b0;
-	reg[6:0] chanAddr_next, chanAddr   = 7'b0000000;
-	reg[7:0] eppData_next, eppData     = 8'h00;
+	reg      eppWait         = 1'b0;
+	reg      eppWait_next;
+	reg[6:0] chanAddr        = 7'b0000000;
+	reg[6:0] chanAddr_next;
+	reg[7:0] eppData         = 8'h00;
+	reg[7:0] eppData_next;
+
+	// Other signals
+	reg      driveBus        = 1'b0;	
 
 	// Infer registers
 	always @(posedge clk_in)
 	begin
 		if ( reset_in == 1'b1 )
 			begin
-				state <= S_IDLE;
-				chanAddr <= 7'b0000000;
-				eppData <= 8'h00;
-				eppWait <= 1'b0;
+				state           <= S_RESET;
+				chanAddr        <= 7'b0000000;
+				eppData         <= 8'h00;
+				eppWait         <= 1'b1;
 				eppAddrStb_sync <= 1'b1;
 				eppDataStb_sync <= 1'b1;
-				eppWrite_sync <= 1'b1;
+				eppWrite_sync   <= 1'b1;
 			end
 		else
 			begin
-				state <= state_next;
-				chanAddr <= chanAddr_next;
-				eppData <= eppData_next;
-				eppWait <= eppWait_next;
+				state           <= state_next;
+				chanAddr        <= chanAddr_next;
+				eppData         <= eppData_next;
+				eppWait         <= eppWait_next;
 				eppAddrStb_sync <= eppAddrStb_in;
 				eppDataStb_sync <= eppDataStb_in;
-				eppWrite_sync <= eppWrite_in;
+				eppWrite_sync   <= eppWrite_in;
 			end
 	end
 
@@ -95,7 +104,8 @@ module
 		h2fData_out = 8'h00;
 		f2hReady_out = 1'b0;
 		h2fValid_out = 1'b0;
-
+		reset_out = 1'b0;
+		driveBus = eppWrite_sync;
 		case ( state )
 			// Finish the address update cycle
 			S_ADDR_WRITE_WAIT:
@@ -147,6 +157,17 @@ module
 						end
 				end
 
+			// S_RESET - tri-state everything
+			S_RESET:
+				begin
+					reset_out = 1'b1;
+					driveBus = 1'b0;
+					if ( eppWrite_sync == 1'b0 )
+						begin
+							state_next = S_IDLE;
+						end
+				end
+
 			// S_IDLE and others
 			default:
 				begin
@@ -176,5 +197,5 @@ module
 	// Drive stateless signals
 	assign chanAddr_out = chanAddr;
 	assign eppWait_out = eppWait;
-	assign eppData_io = (eppWrite_in == 1'b1) ? eppData : 8'hZZ;
+	assign eppData_io = (driveBus == 1'b1) ? eppData : 8'hZZ;
 endmodule
